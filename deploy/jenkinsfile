@@ -1,0 +1,125 @@
+#!/usr/bin/env groovy
+def COMMIT_ID = ''  // 在流水線頂部宣告全局變數
+def PUBLISH_VERSION = ''  // 在流水線頂部宣告全局變數
+def fetchGitTags() {
+  // XXX: Fetch tags, because Jenkins pipeline does not fetch tags when SCM checkout
+  // Ref. https://issues.jenkins-ci.org/browse/JENKINS-45164
+  // Ref. https://github.com/allegro/axion-release-plugin/issues/195
+  checkout scm: [
+    $class: 'GitSCM',
+    branches: scm.branches,
+    doGenerateSubmoduleConfigurations: scm.doGenerateSubmoduleConfigurations,
+    extensions: scm.extensions + [[$class: 'CloneOption', noTags: false, shallow: false, reference: '']],
+    userRemoteConfigs: scm.userRemoteConfigs,
+  ]
+}
+
+def POD_LABEL = ({
+  // Ref. https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names
+  def podLabel = "worker-${JOB_NAME}".replaceAll(/\/|(?i)(%2F)/, "-").replaceAll(/(?i)[^a-z\d-]/, "").take(63)
+  while (podLabel.endsWith("-")) {
+    podLabel = podLabel[0..-2]  // remove trailing dashes
+  }
+  return podLabel
+})()
+
+def getCustomVersion(String versionPrefix) {
+  if (env.BRANCH_NAME ==~ /^main$/) {
+    return "${versionPrefix}${env.BUILD_NUMBER}"
+  } else if (env.BRANCH_NAME ==~ /^sit$/) {
+    return "${versionPrefix}${env.BUILD_NUMBER}-sit"
+  } else if (env.BRANCH_NAME ==~ /^dev$/) {
+    return "${versionPrefix}${env.BUILD_NUMBER}-dev"
+  } else {
+    return "${versionPrefix}${env.BUILD_NUMBER}-${env.BRANCH_NAME}"
+  }
+}
+
+pipeline {
+    agent {
+        kubernetes {
+            label POD_LABEL
+            defaultContainer "ci"
+              yaml """
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  serviceAccountName: jenkins
+                  containers:
+                    - name: ci
+                      image: mcr.microsoft.com/dotnet/sdk:8.0-alpine3.18
+                      securityContext:
+                        privileged: true
+                      tty: true
+                      resources:
+                        requests:
+                          cpu: 1000m
+                          memory: 2Gi
+                        limits:
+                          cpu: 1000m
+                          memory: 2Gi
+                """
+        }
+    }
+
+    environment {
+        LIB_NAME = "Ally.RabbitMq"
+        VERSION_PREFIX = "1.5."
+        VERSION = getCustomVersion(VERSION_PREFIX)
+        NUGET_URL = 'https://nexus.devops.allytransport.com.tw/repository/nuget-hosted/'
+        NUGET_APIKEY = '773999c4-1fdf-353a-8f9e-c86ffe336421'
+    }
+
+    stages {
+        stage('Fetch Git Tags') {
+            steps {
+            fetchGitTags()
+            }
+        }
+        stage('Prepare') {
+          steps {
+            script {
+            sh "apk update && apk add git"
+            sh "git config --global --add safe.directory ${WORKSPACE}"
+            COMMIT_ID = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+            PUBLISH_VERSION = "${VERSION}"
+            }
+          }
+        }
+        stage('Build and Publish') {
+            steps {
+                echo "LIB_NAME: ${env.LIB_NAME}"
+                echo "PUBLISH_VERSION: ${PUBLISH_VERSION}"
+                script {
+                    def commitId = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    sh """
+                        #!/bin/bash
+
+                        dotnet pack "src/${LIB_NAME}.sln" -o ./nupkg -c Release -p:PackageVersion=${PUBLISH_VERSION} -p:CommitHash="${commitId}" -p:CommitMessage="${commitMessage}"
+
+                        dotnet nuget push -s ${NUGET_URL} -k ${NUGET_APIKEY} nupkg/${LIB_NAME}.${PUBLISH_VERSION}.nupkg
+                    """
+                }
+            }
+        }
+        stage('Notify User') {
+            steps {
+              script {
+                def commitMessage = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                def message = """
+                {
+                  "text": "The build and publish process has completed successfully!\nLibrary: ${LIB_NAME}\nVersion: ${VERSION}\nCommitMessage: ${commitMessage}"
+                }
+                """
+                // 使用 curl 發送消息
+                sh """
+                curl -X POST -H 'Content-Type: application/json' \
+                -d '${message}' \
+                'https://chat.googleapis.com/v1/spaces/AAAAch2frQg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=RhM2tM0Zw17wcPX_8vTGrWy0dNtm54NFRbsVpqqs_hk'
+                """
+            }
+          }
+        }
+    }
+}

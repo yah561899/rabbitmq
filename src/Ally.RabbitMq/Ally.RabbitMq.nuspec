@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+<package>
+  <metadata>
+    <id>Ally.RabbitMq</id>
+    <version>1.0.0</version>
+    <authors>AllyTansport</authors>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>A shared component based on standard 2.0 </description>
+    <releaseNotes>Initial release</releaseNotes>
+    <copyright>Copyright 2023 AllyTansport</copyright>
+    <tags>Ally RabbitMq</tags>
+  </metadata>
+</package>
