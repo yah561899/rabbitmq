@@ -66,7 +66,7 @@ pipeline {
         LIB_NAME = "Ally.RabbitMq"
         VERSION_PREFIX = "1.5."
         VERSION = getCustomVersion(VERSION_PREFIX)
-        NUGET_URL = 'https://nexus.devops.allytransport.com.tw/repository/nuget-hosted/'
+        NUGET_URL = 'https://nexus.devops/repository/nuget-hosted/'
         NUGET_APIKEY = '773999c4-1fdf-353a-8f9e-c86ffe336421'
     }
 
